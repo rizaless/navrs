@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Path Visualization with Barcode and AR.js</title>
+    <script src="https://cdn.jsdelivr.net/gh/jeromeetienne/AR.js/aframe/build/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/jeromeetienne/AR.js/aframe/build/ar.js"></script>
+    <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #canvas { position: absolute; top: 0; left: 0; }
+    </style>
+</head>
+<body>
+
+<h2>AR Path Visualization</h2>
+<video id="video" autoplay></video>
+<canvas id="canvas"></canvas>
+
+<!-- AR.js Setup -->
+<a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false; trackingMethod: best;">
+    <a-marker preset="hiro">
+        <a-entity id="pathEntity" position="0 0 0" rotation="0 0 0" scale="1 1 1">
+            <!-- Visualize path with a 3D box or line (to be adjusted based on path data) -->
+            <a-box color="red" depth="0.2" height="0.2" width="0.2"></a-box>
+        </a-entity>
+    </a-marker>
+    <a-entity camera></a-entity>
+</a-scene>
+
+<div id="result"></div>
+
+<div id="destinationInput" style="display:none;">
+    <label for="destination">Enter destination (0-4): </label>
+    <input type="number" id="destination" min="0" max="4">
+    <button id="submitDestination">Submit</button>
+</div>
+
+<script>
+    // Graph adjacency matrix (example)
+    const graph = [
+        [0, 10, 0, 30, 0],
+        [10, 0, 50, 0, 0],
+        [0, 50, 0, 20, 10],
+        [30, 0, 20, 0, 60],
+        [0, 0, 10, 60, 0]
+    ];
+
+    const start = 0; // Start node (constant)
+
+    // Dijkstra Algorithm
+    function dijkstra(graph, start, destination) {
+        const n = graph.length;
+        let dist = Array(n).fill(Infinity);
+        let prev = Array(n).fill(null);
+        let visited = Array(n).fill(false);
+
+        dist[start] = 0;
+
+        for (let i = 0; i < n - 1; i++) {
+            let u = getMinDistanceNode(dist, visited);
+            visited[u] = true;
+
+            for (let v = 0; v < n; v++) {
+                if (!visited[v] && graph[u][v] !== 0 && dist[u] + graph[u][v] < dist[v]) {
+                    dist[v] = dist[u] + graph[u][v];
+                    prev[v] = u;
+                }
+            }
+        }
+
+        let path = [];
+        let u = destination;
+        while (prev[u] !== null) {
+            path.unshift(u);
+            u = prev[u];
+        }
+        path.unshift(start);
+
+        return { dist, path };
+    }
+
+    function getMinDistanceNode(dist, visited) {
+        let min = Infinity;
+        let minNode = -1;
+        for (let i = 0; i < dist.length; i++) {
+            if (!visited[i] && dist[i] < min) {
+                min = dist[i];
+                minNode = i;
+            }
+        }
+        return minNode;
+    }
+
+    // Setup video and canvas for drawing
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let videoStream = null;
+    let width = 640, height = 480;
+    let path = [];
+
+    // Start camera feed
+    function startCamera() {
+        navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" }
+        }).then(function(stream) {
+            videoStream = stream;
+            video.srcObject = stream;
+            video.width = width;
+            video.height = height;
+
+            setInterval(scanBarcode, 100);
+        }).catch(function(error) {
+            console.error("Error accessing camera", error);
+        });
+    }
+
+    // Scan barcode from video stream
+    function scanBarcode() {
+        if (videoStream) {
+            ctx.drawImage(video, 0, 0, width, height);
+            const imageData = ctx.getImageData(0, 0, width, height);
+            const qrCode = jsQR(imageData.data, width, height);
+
+            if (qrCode) {
+                const destination = parseInt(qrCode.data);  // Assuming barcode contains the destination node
+                if (isNaN(destination) || destination < 0 || destination >= graph.length) {
+                    alert("Invalid destination in barcode");
+                } else {
+                    // Show the input form for destination
+                    document.getElementById('destinationInput').style.display = 'block';
+                }
+            }
+        }
+    }
+
+    // Handle destination input submission
+    document.getElementById('submitDestination').addEventListener('click', function() {
+        const destination = parseInt(document.getElementById('destination').value);
+        if (isNaN(destination) || destination < 0 || destination >= graph.length) {
+            alert("Invalid destination!");
+        } else {
+            path = getShortestPath(destination);
+            displayPath(path);
+            document.getElementById('destinationInput').style.display = 'none'; // Hide input form
+        }
+    });
+
+    // Get shortest path
+    function getShortestPath(destination) {
+        const result = dijkstra(graph, start, destination);
+        return result.path;
+    }
+
+    // Display path as 3D object
+    function displayPath(path) {
+        const markerEntity = document.getElementById('pathEntity');
+        const nodePositions = [
+            { x: 0, y: 0, z: 0 },
+            { x: 2, y: 0, z: 0 },
+            { x: 4, y: 0, z: 0 },
+            { x: 6, y: 0, z: 0 },
+            { x: 8, y: 0, z: 0 }
+        ]; // Example node positions
+
+        const pathEntities = path.map((node, index) => {
+            const position = nodePositions[node];
+            const pathEntity = document.createElement('a-entity');
+            pathEntity.setAttribute('geometry', { primitive: 'box', depth: 0.2, height: 0.2, width: 0.2 });
+            pathEntity.setAttribute('material', 'color: red;');
+            pathEntity.setAttribute('position', `${position.x} ${position.y} ${position.z}`);
+            return pathEntity;
+        });
+
+        // Clear previous path and add new entities
+        markerEntity.innerHTML = ''; // Remove previous path markers
+        pathEntities.forEach(entity => markerEntity.appendChild(entity));
+
+        document.getElementById("result").innerHTML = `Shortest path: ${path.join(" -> ")}`;
+    }
+
+    // Start camera when the page loads
+    window.onload = function() {
+        startCamera();
+    };
+</script>
+
+</body>
+</html>
